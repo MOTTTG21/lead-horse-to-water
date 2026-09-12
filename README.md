@@ -25,7 +25,7 @@ Following the build order (smallest, most isolated pieces first):
 - [x] 3. Audit log, `system` + `external_call` fields (`src/horse_gateway/audit.py`, tested)
 - [x] 4. Gateway wiring, including the deliberate `let_horse_decide` gap (`src/horse_gateway/gateway.py`, tested)
 - [x] 5. Mock MCP tool server (live horse simulation) (`src/horse_gateway/horse_sim_server.py`, tested)
-- [ ] 6. Second MCP tool server (stable records) + third-party tool
+- [x] 6. Second MCP tool server (stable records) + third-party tool (`stable_records_server.py`, `social_server.py`, tested, plus an end-to-end multi-system integration test)
 - [ ] 7. Agent runner's structured-output turn (dialogue + stage + trust delta)
 - [ ] 8. `let_horse_decide` internal decision call
 - [ ] 9. Synthetic `stablehand` traffic generator
