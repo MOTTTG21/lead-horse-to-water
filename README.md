@@ -30,7 +30,7 @@ Following the build order (smallest, most isolated pieces first):
 - [x] 8. `let_horse_decide` internal decision call + bounded narration call (`horse_decision.py`, tested)
 - [x] 9. Synthetic `stablehand` traffic generator (`synthetic_traffic.py`, tested)
 - [x] 10. Observability -- metrics/alerting library (`llm_metrics.py`, `metrics.py`, tested; runbook at [`docs/runbook.md`](docs/runbook.md)). The actual HTTP metrics endpoint + dashboard page are deferred to step 12, since both need the FastAPI app skeleton that doesn't exist yet.
-- [ ] 11. Field guide unlock logic
+- [x] 11. Field guide unlock logic (`field_guide.py`, tested)
 - [ ] 12. Web UI (chat, barn logbook, field guide tab, debrief screen, metrics dashboard)
 
 ## Setup
