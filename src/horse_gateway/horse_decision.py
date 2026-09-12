@@ -27,12 +27,19 @@ Gateway.call_tool never needs to know an LLM is behind it.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .agent_turn import Stage, describe_environment_for_horse
 from .config import GameConfig
 from .gateway import HorseDecider, SessionState
 from .horse_sim_server import HorseSimState
+from .llm_metrics import LLMCallRecord, LLMMetricsLog, estimate_cost_usd
+
+
+def _extract_usage(response: Any) -> tuple[int, int]:
+    usage = getattr(response, "usage", None)
+    return (getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0)
 
 HORSE_SIM_TOOL_NAMES: list[str] = [
     "graze",
@@ -120,11 +127,13 @@ def make_decider(
     horse_state: HorseSimState,
     stage: Stage,
     config: GameConfig | None = None,
+    llm_metrics_log: LLMMetricsLog | None = None,
 ) -> HorseDecider:
     config = config or GameConfig()
     system_prompt = _build_decision_system_prompt(stage, horse_state, config)
 
-    def decide(_session: SessionState) -> tuple[str, dict[str, Any]]:
+    def decide(session: SessionState) -> tuple[str, dict[str, Any]]:
+        start = time.monotonic()
         response = client.messages.create(
             model=model,
             max_tokens=64,
@@ -136,10 +145,26 @@ def make_decider(
             tools=[DECISION_TOOL_SCHEMA],
             tool_choice={"type": "tool", "name": "pick_action"},
         )
+        latency_seconds = time.monotonic() - start
+
         tool_use = next(block for block in response.content if block.type == "tool_use")
         tool = tool_use.input["tool"]
         if tool not in HORSE_SIM_TOOL_NAMES:
             raise ValueError(f"decider returned an out-of-scope tool: {tool!r}")
+
+        if llm_metrics_log is not None:
+            input_tokens, output_tokens = _extract_usage(response)
+            llm_metrics_log.write(
+                LLMCallRecord(
+                    session_id=session.session_id,
+                    call_type="decision",
+                    latency_seconds=latency_seconds,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    estimated_cost_usd=estimate_cost_usd(input_tokens, output_tokens, config),
+                )
+            )
+
         return tool, {}
 
     return decide
@@ -152,11 +177,16 @@ def narrate_reaction(
     tool: str,
     tool_result: Any,
     horse_state: HorseSimState,
+    session_id: str,
+    config: GameConfig | None = None,
+    llm_metrics_log: LLMMetricsLog | None = None,
 ) -> str:
+    config = config or GameConfig()
     system_prompt = NARRATION_SYSTEM_PROMPT_TEMPLATE.format(
         tool=tool,
         environment_summary=describe_environment_for_horse(horse_state),
     )
+    start = time.monotonic()
     response = client.messages.create(
         model=model,
         max_tokens=200,
@@ -168,5 +198,21 @@ def narrate_reaction(
         # Deliberately no `tools` kwarg at all -- tool use is structurally
         # impossible for this call, not merely discouraged by prompt.
     )
+    latency_seconds = time.monotonic() - start
+
     text_block = next(block for block in response.content if block.type == "text")
+
+    if llm_metrics_log is not None:
+        input_tokens, output_tokens = _extract_usage(response)
+        llm_metrics_log.write(
+            LLMCallRecord(
+                session_id=session_id,
+                call_type="narration",
+                latency_seconds=latency_seconds,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                estimated_cost_usd=estimate_cost_usd(input_tokens, output_tokens, config),
+            )
+        )
+
     return text_block.text

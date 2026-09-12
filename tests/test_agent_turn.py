@@ -18,8 +18,12 @@ Two things are tested here, deliberately kept apart per docs/design-plan.md's
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
+
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 
 from horse_gateway.agent_turn import (
     TURN_OUTPUT_TOOL_SCHEMA,
@@ -28,8 +32,10 @@ from horse_gateway.agent_turn import (
     TurnResult,
     describe_environment_for_horse,
 )
+from horse_gateway.config import GameConfig
 from horse_gateway.gateway import SessionState
 from horse_gateway.horse_sim_server import HorseSimState
+from horse_gateway.llm_metrics import LLMMetricsLog
 from horse_gateway.models import Role
 
 
@@ -121,6 +127,7 @@ class FakeToolUseBlock:
 @dataclass
 class FakeResponse:
     content: list
+    usage: Any = None
 
 
 class FakeMessagesEndpoint:
@@ -172,3 +179,58 @@ def test_claude_turn_generator_clamps_out_of_range_trust_delta():
     generator = ClaudeTurnGenerator(FakeAnthropicClient(response), model="claude-sonnet-5")
     result = generator.generate_turn([], "hi", "")
     assert result.trust_delta == 1.0
+
+
+@dataclass
+class FakeUsage:
+    input_tokens: int
+    output_tokens: int
+
+
+def test_claude_turn_generator_extracts_token_usage_when_present():
+    response = FakeResponse(
+        content=[FakeToolUseBlock(input={"dialogue": "x", "stage": "preparation", "trust_delta": 0.0})],
+        usage=FakeUsage(input_tokens=123, output_tokens=45),
+    )
+    generator = ClaudeTurnGenerator(FakeAnthropicClient(response), model="claude-sonnet-5")
+    result = generator.generate_turn([], "hi", "")
+    assert result.input_tokens == 123
+    assert result.output_tokens == 45
+
+
+def make_llm_metrics_log() -> LLMMetricsLog:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    return LLMMetricsLog(engine)
+
+
+def test_play_turn_records_llm_call_metrics_when_a_log_is_given():
+    generator = FakeTurnGenerator(
+        TurnResult(dialogue="", stage="contemplation", trust_delta=0.1, input_tokens=200, output_tokens=80)
+    )
+    metrics_log = make_llm_metrics_log()
+    config = GameConfig(agent_model_input_cost_per_million=2.0, agent_model_output_cost_per_million=10.0)
+    runner = AgentRunner(generator, llm_metrics_log=metrics_log, config=config)
+    session = SessionState(session_id="s-metrics", role=Role.GUEST)
+
+    runner.play_turn(session, [], "hello", "")
+
+    rows = metrics_log.for_session("s-metrics")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.call_type == "turn"
+    assert row.input_tokens == 200
+    assert row.output_tokens == 80
+    assert row.estimated_cost_usd == pytest.approx(200 / 1_000_000 * 2.0 + 80 / 1_000_000 * 10.0)
+    assert row.latency_seconds >= 0.0
+
+
+def test_play_turn_records_nothing_when_no_metrics_log_given():
+    generator = FakeTurnGenerator(TurnResult(dialogue="", stage="precontemplation", trust_delta=0.0))
+    runner = AgentRunner(generator)  # no llm_metrics_log
+    session = SessionState(session_id="s-no-metrics", role=Role.GUEST)
+    # Must not raise just because no metrics log was provided.
+    runner.play_turn(session, [], "hello", "")

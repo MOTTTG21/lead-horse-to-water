@@ -10,6 +10,7 @@ as test_agent_turn.py.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 
@@ -40,6 +41,7 @@ class FakeTextBlock:
 @dataclass
 class FakeResponse:
     content: list
+    usage: Any = None
 
 
 class FakeMessagesEndpoint:
@@ -197,7 +199,91 @@ def test_narration_call_never_passes_tools_at_all():
         tool="drink",
         tool_result={"success": True},
         horse_state=HorseSimState(),
+        session_id="s1",
     )
     assert text == "The horse drinks deeply."
     assert "tools" not in client.messages.last_kwargs
     assert "tool_choice" not in client.messages.last_kwargs
+
+
+# --- LLM call metrics recording (both calls) ---
+
+
+@dataclass
+class FakeUsage:
+    input_tokens: int
+    output_tokens: int
+
+
+def make_llm_metrics_log():
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    from horse_gateway.llm_metrics import LLMMetricsLog
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    return LLMMetricsLog(engine)
+
+
+def test_decider_records_llm_call_metrics_when_a_log_is_given():
+    response = FakeResponse(
+        content=[FakeToolUseBlock(input={"tool": "graze"})],
+        usage=FakeUsage(input_tokens=50, output_tokens=5),
+    )
+    client = FakeAnthropicClient(response)
+    metrics_log = make_llm_metrics_log()
+    decider = make_decider(
+        client=client,
+        model="claude-sonnet-5",
+        conversation_history=[],
+        horse_state=HorseSimState(),
+        stage="precontemplation",
+        config=GameConfig(agent_model_input_cost_per_million=2.0, agent_model_output_cost_per_million=10.0),
+        llm_metrics_log=metrics_log,
+    )
+    decider(make_session())
+    rows = metrics_log.for_session("s1")
+    assert len(rows) == 1
+    assert rows[0].call_type == "decision"
+    assert rows[0].input_tokens == 50
+    assert rows[0].output_tokens == 5
+
+
+def test_decider_records_nothing_when_no_metrics_log_given():
+    response = FakeResponse(content=[FakeToolUseBlock(input={"tool": "graze"})])
+    decider = make_decider(
+        client=FakeAnthropicClient(response),
+        model="claude-sonnet-5",
+        conversation_history=[],
+        horse_state=HorseSimState(),
+        stage="precontemplation",
+    )
+    decider(make_session())  # must not raise with no llm_metrics_log
+
+
+def test_narration_records_llm_call_metrics_when_a_log_is_given():
+    response = FakeResponse(
+        content=[FakeTextBlock(text="Neigh.")],
+        usage=FakeUsage(input_tokens=30, output_tokens=10),
+    )
+    client = FakeAnthropicClient(response)
+    metrics_log = make_llm_metrics_log()
+    narrate_reaction(
+        client=client,
+        model="claude-sonnet-5",
+        conversation_history=[],
+        tool="graze",
+        tool_result=None,
+        horse_state=HorseSimState(),
+        session_id="s-narration",
+        llm_metrics_log=metrics_log,
+    )
+    rows = metrics_log.for_session("s-narration")
+    assert len(rows) == 1
+    assert rows[0].call_type == "narration"
+    assert rows[0].input_tokens == 30
+    assert rows[0].output_tokens == 10

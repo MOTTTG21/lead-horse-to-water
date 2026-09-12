@@ -21,6 +21,15 @@ class GameConfig(BaseSettings):
     # judgment, and internal tool-picking decision.
     agent_model: str = "claude-sonnet-5"
 
+    # Cost estimation for the observability layer. Claude Sonnet 5
+    # pricing as of 2026-09; update if pricing or agent_model changes.
+    agent_model_input_cost_per_million: float = 2.0
+    agent_model_output_cost_per_million: float = 10.0
+
+    # Basic alerting thresholds (see docs/design-plan.md, "Observability").
+    llm_agent_loop_rate_alert_threshold: float = 0.05
+    post_to_stable_social_denial_alert_threshold: int = 5
+
     # Guardrails (see docs/design-plan.md "Guardrails" section).
     let_horse_decide_cooldown_seconds: float = 30.0
     social_post_cap_per_session: int = 1

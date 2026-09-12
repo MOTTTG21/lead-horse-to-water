@@ -29,9 +29,9 @@ Following the build order (smallest, most isolated pieces first):
 - [x] 7. Agent runner's structured-output turn (dialogue + stage + trust delta) (`agent_turn.py`, tested against a fake Anthropic client)
 - [x] 8. `let_horse_decide` internal decision call + bounded narration call (`horse_decision.py`, tested)
 - [x] 9. Synthetic `stablehand` traffic generator (`synthetic_traffic.py`, tested)
-- [ ] 10. Observability (metrics, alerting, dashboard)
+- [x] 10. Observability -- metrics/alerting library (`llm_metrics.py`, `metrics.py`, tested; runbook at [`docs/runbook.md`](docs/runbook.md)). The actual HTTP metrics endpoint + dashboard page are deferred to step 12, since both need the FastAPI app skeleton that doesn't exist yet.
 - [ ] 11. Field guide unlock logic
-- [ ] 12. Web UI (chat, barn logbook, field guide tab, debrief screen)
+- [ ] 12. Web UI (chat, barn logbook, field guide tab, debrief screen, metrics dashboard)
 
 ## Setup
 

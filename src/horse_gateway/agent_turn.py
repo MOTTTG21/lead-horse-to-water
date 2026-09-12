@@ -20,10 +20,13 @@ there is no attribute to accidentally leak.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, get_args
 
+from .config import GameConfig
 from .horse_sim_server import HorseSimState
+from .llm_metrics import LLMCallRecord, LLMMetricsLog, estimate_cost_usd
 
 Stage = Literal["precontemplation", "contemplation", "preparation"]
 
@@ -90,6 +93,8 @@ class TurnResult:
     dialogue: str
     stage: Stage
     trust_delta: float
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class TurnGenerator(Protocol):
@@ -156,7 +161,17 @@ class ClaudeTurnGenerator:
 
         trust_delta = max(-1.0, min(1.0, float(data["trust_delta"])))
 
-        return TurnResult(dialogue=data["dialogue"], stage=stage, trust_delta=trust_delta)
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "input_tokens", 0) or 0
+        output_tokens = getattr(usage, "output_tokens", 0) or 0
+
+        return TurnResult(
+            dialogue=data["dialogue"],
+            stage=stage,
+            trust_delta=trust_delta,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
 
 
 def _clamp01(value: float) -> float:
@@ -167,10 +182,23 @@ class AgentRunner:
     """Applies one turn's result to session bookkeeping. Does not call
     the LLM itself -- that's the injected TurnGenerator's job -- so this
     class's behavior is pure and deterministic, unlike the model's
-    judgment it's built on top of."""
+    judgment it's built on top of.
 
-    def __init__(self, turn_generator: TurnGenerator):
+    Optionally records this turn's latency and estimated cost to an
+    LLMMetricsLog -- timed here, around the TurnGenerator call, rather
+    than inside ClaudeTurnGenerator, so the metrics-recording concern
+    stays out of the thing that actually talks to the API.
+    """
+
+    def __init__(
+        self,
+        turn_generator: TurnGenerator,
+        llm_metrics_log: LLMMetricsLog | None = None,
+        config: GameConfig | None = None,
+    ):
         self._turn_generator = turn_generator
+        self._llm_metrics_log = llm_metrics_log
+        self._config = config or GameConfig()
 
     def play_turn(
         self,
@@ -179,11 +207,29 @@ class AgentRunner:
         player_message: str,
         environment_summary: str,
     ) -> TurnResult:
+        start = time.monotonic()
         result = self._turn_generator.generate_turn(
             conversation_history, player_message, environment_summary
         )
+        latency_seconds = time.monotonic() - start
+
         session.trust_level = _clamp01(session.trust_level + result.trust_delta)
         session.stage = result.stage
+
+        if self._llm_metrics_log is not None:
+            self._llm_metrics_log.write(
+                LLMCallRecord(
+                    session_id=session.session_id,
+                    call_type="turn",
+                    latency_seconds=latency_seconds,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    estimated_cost_usd=estimate_cost_usd(
+                        result.input_tokens, result.output_tokens, self._config
+                    ),
+                )
+            )
+
         return result
 
     @staticmethod
