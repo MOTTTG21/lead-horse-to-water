@@ -17,6 +17,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class GameConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="HORSE_GAME_")
 
+    # Which Claude model powers the horse's dialogue, stage/trust
+    # judgment, and internal tool-picking decision.
+    agent_model: str = "claude-sonnet-5"
+
     # Guardrails (see docs/design-plan.md "Guardrails" section).
     let_horse_decide_cooldown_seconds: float = 30.0
     social_post_cap_per_session: int = 1
