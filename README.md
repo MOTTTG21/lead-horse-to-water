@@ -28,7 +28,7 @@ Following the build order (smallest, most isolated pieces first):
 - [x] 6. Second MCP tool server (stable records) + third-party tool (`stable_records_server.py`, `social_server.py`, tested, plus an end-to-end multi-system integration test)
 - [x] 7. Agent runner's structured-output turn (dialogue + stage + trust delta) (`agent_turn.py`, tested against a fake Anthropic client)
 - [x] 8. `let_horse_decide` internal decision call + bounded narration call (`horse_decision.py`, tested)
-- [ ] 9. Synthetic `stablehand` traffic generator
+- [x] 9. Synthetic `stablehand` traffic generator (`synthetic_traffic.py`, tested)
 - [ ] 10. Observability (metrics, alerting, dashboard)
 - [ ] 11. Field guide unlock logic
 - [ ] 12. Web UI (chat, barn logbook, field guide tab, debrief screen)

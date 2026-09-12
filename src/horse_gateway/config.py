@@ -36,5 +36,13 @@ class GameConfig(BaseSettings):
     thirst_threshold_for_win: float = 6.0
     min_settled_turns_before_drinkable: int = 3
 
+    # Synthetic stablehand traffic (see "Roles" in docs/design-plan.md).
+    synthetic_traffic_interval_seconds: float = 15.0
+    # Probability of rotating to a fresh synthetic tenant after a
+    # non-social action, so the logbook shows more than one long-lived
+    # synthetic session over time. A social post always rotates
+    # regardless of this value, once its once-per-session cap is used.
+    synthetic_traffic_new_tenant_probability: float = 0.05
+
 
 DEFAULT_CONFIG = GameConfig()
