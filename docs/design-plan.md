@@ -303,10 +303,14 @@ water availability, how long each has held), and the complete
 conversational history plus the most recently self-reported stage. All
 three are required.
 
-`let_horse_decide()` needs its own spend guardrail: the button only
-unlocks once the horse's self-reported stage reaches `preparation`, and it
-additionally carries its own cooldown independent of stage or the chat
-rate limit.
+`let_horse_decide()` needs its own spend guardrail, separate from the
+chat rate limit: an independent cooldown, distinct from any per-message
+limit governing ordinary chat. It is **not** gated behind reaching
+`preparation` — see the note on early discoverability under "The exploit,
+concretely" and under "Field guide." The cooldown alone bounds spend
+whether the button is pressed on turn one or turn fifty; a stage gate
+would only have hidden the bug behind conversational progress, which
+directly fights the point of making it discoverable early.
 
 **Refill timing** — bound to conversational turns, not any tool call or
 the wall clock. The "settled" unit must be a full conversational turn (a
@@ -327,19 +331,6 @@ that it is overwhelmingly compelled to select `drink()`.
 
 ## Open questions
 
-- **Resolved during implementation, flagging the contradiction that led
-  here:** the original doc contradicted itself on whether
-  `let_horse_decide()` is stage-gated. "The exploit, concretely," the
-  "Guardrails" section, and "Definition of done" all say it's callable
-  from turn one, specifically for early discoverability of the bug. But
-  "Model call architecture (resolved)" separately lists stage-gating
-  behind `preparation` as one of two *required* spend guardrails. Built
-  to the 3-section majority: **no stage gate, cooldown-only** (see
-  `let_horse_decide_cooldown_seconds` in `src/horse_gateway/config.py`
-  and the guardrail logic in `src/horse_gateway/gateway.py`). A cooldown
-  alone still bounds spend from turn one; it just doesn't hide the bug
-  behind conversational progress. Revisit if the stage-gate was actually
-  the intended behavior.
 - Exact numeric thresholds for stage advancement, trust decay, heat/thirst
   weighting, and minimum settled turn-count — start as config defaults,
   retune after soft-launch playtesting.
