@@ -1,0 +1,36 @@
+"""Config-driven thresholds and guardrail values.
+
+Per the design doc: "All difficulty-relevant thresholds ... are config
+values from the start, not hardcoded constants." The numbers below are
+placeholder defaults pending soft-launch playtest data (see the Open
+Questions section of docs/design-plan.md) -- the point of this module is
+that retuning them later is a config change, not a code change. Override
+any field via an environment variable prefixed `HORSE_GAME_` (e.g.
+`HORSE_GAME_LET_HORSE_DECIDE_COOLDOWN_SECONDS=45`).
+"""
+
+from __future__ import annotations
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class GameConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="HORSE_GAME_")
+
+    # Guardrails (see docs/design-plan.md "Guardrails" section).
+    let_horse_decide_cooldown_seconds: float = 30.0
+    social_post_cap_per_session: int = 1
+
+    # Live horse simulation thresholds (see "Model call architecture" and
+    # "Refill timing" in docs/design-plan.md). Thirst is an unbounded
+    # accrual counter, not a fixed 0-10 scale -- there is no ceiling to
+    # clamp against, only a threshold past which the horse is "thirsty
+    # enough."
+    thirst_increment_per_dry_action: float = 2.0
+    thirst_increment_per_turn_while_dry: float = 0.5
+    thirst_increment_per_turn_while_hot: float = 0.5
+    thirst_threshold_for_win: float = 6.0
+    min_settled_turns_before_drinkable: int = 3
+
+
+DEFAULT_CONFIG = GameConfig()

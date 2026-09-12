@@ -23,8 +23,8 @@ Following the build order (smallest, most isolated pieces first):
 - [x] 1. PEP architecture documented (`docs/architecture.md`)
 - [x] 2. Policy engine, both roles + both systems (`src/horse_gateway/policy.py`, tested)
 - [x] 3. Audit log, `system` + `external_call` fields (`src/horse_gateway/audit.py`, tested)
-- [ ] 4. Gateway wiring, including the deliberate `let_horse_decide` gap
-- [ ] 5. Mock MCP tool server (live horse simulation)
+- [x] 4. Gateway wiring, including the deliberate `let_horse_decide` gap (`src/horse_gateway/gateway.py`, tested)
+- [x] 5. Mock MCP tool server (live horse simulation) (`src/horse_gateway/horse_sim_server.py`, tested)
 - [ ] 6. Second MCP tool server (stable records) + third-party tool
 - [ ] 7. Agent runner's structured-output turn (dialogue + stage + trust delta)
 - [ ] 8. `let_horse_decide` internal decision call

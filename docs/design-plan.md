@@ -327,6 +327,19 @@ that it is overwhelmingly compelled to select `drink()`.
 
 ## Open questions
 
+- **Resolved during implementation, flagging the contradiction that led
+  here:** the original doc contradicted itself on whether
+  `let_horse_decide()` is stage-gated. "The exploit, concretely," the
+  "Guardrails" section, and "Definition of done" all say it's callable
+  from turn one, specifically for early discoverability of the bug. But
+  "Model call architecture (resolved)" separately lists stage-gating
+  behind `preparation` as one of two *required* spend guardrails. Built
+  to the 3-section majority: **no stage gate, cooldown-only** (see
+  `let_horse_decide_cooldown_seconds` in `src/horse_gateway/config.py`
+  and the guardrail logic in `src/horse_gateway/gateway.py`). A cooldown
+  alone still bounds spend from turn one; it just doesn't hide the bug
+  behind conversational progress. Revisit if the stage-gate was actually
+  the intended behavior.
 - Exact numeric thresholds for stage advancement, trust decay, heat/thirst
   weighting, and minimum settled turn-count — start as config defaults,
   retune after soft-launch playtesting.
