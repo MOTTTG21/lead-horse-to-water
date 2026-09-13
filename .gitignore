@@ -7,3 +7,4 @@ htmlcov/
 *.egg-info/
 .env
 .DS_Store
+*.db

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lead the horse to water</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <header class="topbar">
+      <h1>🐴 Lead the horse to water</h1>
+      <nav>
+        <button id="tab-game" class="tab active">Game</button>
+        <button id="tab-logbook" class="tab">Barn logbook</button>
+        <button id="tab-guide" class="tab">Field guide <span id="guide-counter"></span></button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="panel-game" class="panel active">
+        <div class="meters">
+          <div class="meter">
+            <label>Trust</label>
+            <div class="bar"><div id="trust-bar" class="bar-fill trust"></div></div>
+          </div>
+          <div class="meter">
+            <label>Stage</label>
+            <div id="stage-label" class="stage-label">precontemplation</div>
+          </div>
+        </div>
+
+        <div id="chat-log" class="chat-log"></div>
+
+        <form id="chat-form" class="chat-form">
+          <input id="chat-input" type="text" placeholder="Say something to the horse..." autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
+
+        <div class="tool-buttons">
+          <button data-tool="graze">Graze</button>
+          <button data-tool="offer_treat">Offer treat</button>
+          <button data-tool="clean_trough">Clean trough</button>
+          <button data-tool="refill_water">Refill water</button>
+          <button data-tool="open_barn_doors">Open barn doors</button>
+          <button data-tool="get_feeding_schedule">Check feeding schedule</button>
+          <button data-tool="drink" class="danger">Try to drink (you)</button>
+          <button data-tool="post_to_stable_social" class="danger">Post to stable social</button>
+          <button id="let-horse-decide" class="danger">Let the horse decide</button>
+        </div>
+
+        <div id="unlock-toast" class="unlock-toast" hidden></div>
+      </section>
+
+      <section id="panel-logbook" class="panel">
+        <h2>Barn logbook</h2>
+        <p class="hint">Every action anyone takes, allowed or denied. Aggregated across all sessions, including synthetic stablehand traffic.</p>
+        <div class="table-wrap">
+          <table id="logbook-table">
+            <thead>
+              <tr><th>Time</th><th>Session</th><th>Role</th><th>Tool</th><th>System</th><th>Initiator</th><th>Decision</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="panel-guide" class="panel">
+        <h2>Field guide</h2>
+        <div id="guide-entries"></div>
+      </section>
+    </main>
+
+    <div id="debrief-overlay" class="overlay" hidden>
+      <div class="overlay-card">
+        <h2 id="debrief-title">Debrief</h2>
+        <p id="debrief-explanation"></p>
+        <dl id="debrief-stats"></dl>
+        <button id="debrief-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
