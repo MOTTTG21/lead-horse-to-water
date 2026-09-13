@@ -5,11 +5,11 @@ else (policy, audit, the horse simulation, the agent turn, the
 Confused Deputy bypass, the field guide, synthetic traffic) is the
 already-tested library code from the rest of this package.
 
-Identity is stubbed for now: every real visitor is a `guest` (see the
-Auth0 note in docs/design-plan.md's Stack section -- this is meant to be
-swapped for real Auth0 JWT verification later, behind the same
-`get_current_session` dependency, without touching anything downstream
-of it).
+Identity: stubbed by default (every visitor is `guest`, no login
+required) unless AUTH0_DOMAIN / AUTH0_CLIENT_ID / AUTH0_CLIENT_SECRET are
+all set (see auth.py's AuthConfig.configured), in which case real Auth0
+login is required before a game session is created. Every real Auth0
+login maps to Role.GUEST -- `stablehand` stays exclusively synthetic.
 """
 
 from __future__ import annotations
@@ -24,15 +24,18 @@ from typing import Any
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import create_engine
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.sessions import SessionMiddleware
 
 from ..agent_turn import AgentRunner, ClaudeTurnGenerator, describe_environment_for_horse
 from ..audit import AuditLog
 from ..config import GameConfig
+from .auth import AuthConfig, get_current_user_sub, is_authenticated, logout_url, register_oauth
 from ..field_guide import (
     FIELD_GUIDE_CONTENT,
     FieldGuideEntry,
@@ -150,13 +153,27 @@ def create_app(
     audit_log: AuditLog | None = None,
     llm_metrics_log: LLMMetricsLog | None = None,
     config: GameConfig | None = None,
+    auth_config: AuthConfig | None = None,
+    oauth: Any | None = None,
     start_synthetic_traffic: bool = True,
     database_url: str | None = None,
 ) -> FastAPI:
     """Factory, not a module-level singleton -- lets tests build an app
-    with a fake Anthropic client and no background traffic, while
-    production wiring (in __main__.py) uses real ones."""
+    with a fake Anthropic client (and a fake `oauth` client, for testing
+    the login/callback glue without a live Auth0 tenant) and no
+    background traffic, while production wiring (server.py) uses real
+    ones.
+
+    `auth_config` defaults to reading AUTH0_DOMAIN / AUTH0_CLIENT_ID /
+    AUTH0_CLIENT_SECRET from the environment; if none are set,
+    `auth_config.configured` is False and the app falls back to stub
+    identity (every visitor is `guest`, no login required) -- see
+    auth.py's module docstring.
+    """
     config = config or GameConfig()
+    auth_config = auth_config or AuthConfig()
+    if auth_config.configured and oauth is None:
+        oauth = register_oauth(auth_config)
 
     if audit_log is None or llm_metrics_log is None:
         engine = _make_engine(
@@ -194,6 +211,11 @@ def create_app(
     app = FastAPI(title="Lead the horse to water", lifespan=lifespan)
     app.state.session_store = store
     app.state.anthropic_client = anthropic_client
+    # Required for authlib's OAuth state/nonce CSRF handling (via
+    # request.session) even when Auth0 isn't configured -- harmless and
+    # unused in that case, but keeping it unconditional avoids a second
+    # code path to maintain.
+    app.add_middleware(SessionMiddleware, secret_key=auth_config.session_secret_key)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -206,26 +228,48 @@ def create_app(
     def get_current_session(
         request: Request, response: Response, store: SessionStore = Depends(get_store)
     ) -> PlayerSession:
+        if auth_config.configured and not is_authenticated(request.session):
+            raise HTTPException(status_code=401, detail="authentication required")
         cookie_session_id = request.cookies.get("session_id")
         session = store.get_or_create(cookie_session_id)
         if cookie_session_id != session.session_id:
             response.set_cookie("session_id", session.session_id, httponly=True, samesite="lax")
         return session
 
+    if auth_config.configured:
+
+        @app.get("/login")
+        async def login(request: Request):
+            redirect_uri = str(request.url_for("auth_callback"))
+            return await oauth.auth0.authorize_redirect(request, redirect_uri)
+
+        @app.get("/callback", name="auth_callback")
+        async def auth_callback(request: Request):
+            token = await oauth.auth0.authorize_access_token(request)
+            request.session["user"] = token.get("userinfo")
+            return RedirectResponse(url="/")
+
+        @app.get("/logout")
+        async def logout(request: Request):
+            request.session.clear()
+            return_to = str(request.url_for("index"))
+            return RedirectResponse(url=logout_url(auth_config, return_to))
+
     @app.get("/")
     async def index(
         request: Request,
-        response: Response,
-        session: PlayerSession = Depends(get_current_session),
+        store: SessionStore = Depends(get_store),
     ):
-        # get_current_session may have set a Set-Cookie header on the
-        # dependency-injected `response` -- but since this route returns
-        # its OWN Response (TemplateResponse), FastAPI does not merge
-        # that header in automatically. Propagate it by hand.
-        template_response = templates.TemplateResponse(request, "index.html", {})
-        for name, value in response.raw_headers:
-            if name == b"set-cookie":
-                template_response.raw_headers.append((name, value))
+        if auth_config.configured and not is_authenticated(request.session):
+            return RedirectResponse(url="/login")
+
+        cookie_session_id = request.cookies.get("session_id")
+        session = store.get_or_create(cookie_session_id)
+        template_response = templates.TemplateResponse(
+            request, "index.html", {"auth_enabled": auth_config.configured}
+        )
+        if cookie_session_id != session.session_id:
+            template_response.set_cookie("session_id", session.session_id, httponly=True, samesite="lax")
         return template_response
 
     @app.get("/dashboard")

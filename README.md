@@ -46,9 +46,19 @@ Docker itself wasn't available to build/run in the environment this was
 built in, so `docker compose up --build` is worth running once yourself
 to confirm the image builds clean.
 
-What's left is beyond the original build order: wiring real Auth0
-identity in behind `get_current_session`, deploying to GCP Cloud Run
-with secrets in Secret Manager, and retuning the config-driven
+Real Auth0 identity is now wired in too (`web/auth.py`), off by default
+(stub `guest` identity, no login required) unless `AUTH0_DOMAIN` /
+`AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` are all set, in which case a
+real login is required before a game session is created -- every
+authenticated login still maps to `Role.GUEST`; `stablehand` stays
+exclusively synthetic. Tested against a fake OAuth client for the glue
+code (`tests/test_web_app_auth.py`), and manually verified end to end
+against a real Auth0 dev tenant: `/login` redirects to Auth0's real
+Universal Login, a real account logs in, `/callback` completes, and the
+game page renders with a working Log out link.
+
+What's left is beyond the original build order: deploying to GCP Cloud
+Run with secrets in Secret Manager, and retuning the config-driven
 thresholds from real playtest data.
 
 ## Setup
@@ -56,7 +66,7 @@ thresholds from real playtest data.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
-cp .env.example .env  # fill in ANTHROPIC_API_KEY
+cp .env.example .env  # fill in ANTHROPIC_API_KEY; Auth0 vars are optional
 ```
 
 ## Running the game

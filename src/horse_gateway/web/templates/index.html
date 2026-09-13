@@ -14,6 +14,7 @@
         <button id="tab-game" class="tab active">Game</button>
         <button id="tab-logbook" class="tab">Barn logbook</button>
         <button id="tab-guide" class="tab">Field guide <span id="guide-counter"></span></button>
+        {% if auth_enabled %}<a href="/logout" class="tab">Log out</a>{% endif %}
       </nav>
     </header>
 
