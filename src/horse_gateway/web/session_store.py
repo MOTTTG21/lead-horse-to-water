@@ -20,6 +20,7 @@ that's out of scope for what this project is demonstrating.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -52,6 +53,11 @@ class PlayerSession:
     # are meant to accumulate across playthroughs, not restart with the
     # game itself.
     discovered_actions: set[str] = field(default_factory=set)
+    # Timestamps of recent chat messages, for the per-session rate limit
+    # (see web/guardrails.py). Not reset by reset_gameplay() -- a player
+    # who just won or lost shouldn't get a free rate-limit reset by
+    # starting a new attempt.
+    message_timestamps: list[dt.datetime] = field(default_factory=list)
 
 
 class SessionStore:

@@ -87,3 +87,16 @@ def test_reset_gameplay_gives_a_new_gateway_wired_to_the_new_horse_sim():
 
     session.gateway.call_tool(session.game_state, System.HORSE_SIM, "clean_trough", {})
     assert session.horse_sim.state.water_available is False
+
+
+def test_reset_gameplay_does_not_clear_the_rate_limit_window():
+    """A player who hits the chat rate limit shouldn't be able to dodge
+    it by resetting -- reset is about game state, not spend/abuse
+    guardrails."""
+    import datetime as dt
+
+    store = make_store()
+    session = store.create("s1")
+    session.message_timestamps.append(dt.datetime.now(dt.timezone.utc))
+    store.reset_gameplay(session)
+    assert len(session.message_timestamps) == 1

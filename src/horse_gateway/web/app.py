@@ -36,6 +36,7 @@ from ..agent_turn import AgentRunner, ClaudeTurnGenerator, describe_environment_
 from ..audit import AuditLog
 from ..config import GameConfig
 from .auth import AuthConfig, get_current_user_sub, is_authenticated, logout_url, register_oauth
+from .guardrails import daily_spend_usd, is_rate_limited, record_message
 from ..field_guide import (
     FIELD_GUIDE_CONTENT,
     FieldGuideEntry,
@@ -73,6 +74,8 @@ DEBRIEF_EXPLANATION = (
     "`guest_session` -- that's how a real audit trail would surface this, "
     "not by the system flagging itself as broken."
 )
+
+SPEND_CAP_MESSAGE = "The horse needs a nap. Come back tomorrow."
 
 
 def _make_engine(database_url: str):
@@ -370,6 +373,21 @@ def create_app(
     ):
         if session.game_over:
             raise HTTPException(status_code=400, detail="game already over")
+        if is_rate_limited(session, store.config):
+            raise HTTPException(status_code=429, detail="You're chatting too fast -- give it a moment.")
+        if daily_spend_usd(store.llm_metrics_log) >= store.config.daily_spend_cap_usd:
+            return {
+                "dialogue": SPEND_CAP_MESSAGE,
+                "stage": session.game_state.stage,
+                "trust_level": session.game_state.trust_level,
+                "game_over": False,
+                "won": False,
+                "attempted_action": None,
+                "action_outcome": None,
+                "horse_state": asdict(session.horse_sim.state),
+                "newly_unlocked_field_guide": [],
+            }
+        record_message(session)
 
         environment_summary = describe_environment_for_horse(session.horse_sim.state)
         generator = ClaudeTurnGenerator(client, model=store.config.agent_model)
@@ -423,10 +441,10 @@ def create_app(
         session: PlayerSession = Depends(get_current_session),
         store: SessionStore = Depends(get_store),
     ):
-        """Not exposed via any UI button -- kept as a direct API for
-        testing/automation. The player-facing path is natural language
-        through /turn's attempted_action handling, which runs through
-        this exact same helper."""
+        """The button-triggered path, and also directly callable for
+        testing/automation. Natural language through /turn's
+        attempted_action handling runs through this exact same helper --
+        one execution path either way."""
         system = GUEST_ACCESSIBLE_TOOLS.get(tool_name)
         if system is None:
             raise HTTPException(status_code=404, detail="unknown tool")
@@ -445,12 +463,13 @@ def create_app(
         store: SessionStore = Depends(get_store),
         client: Any = Depends(get_client),
     ):
-        """Not exposed via any UI button -- kept as a direct API for
-        testing/automation. The player-facing path is natural language
-        ("you decide") through /turn, which runs through this exact same
-        helper."""
+        """The button-triggered path, and also directly callable for
+        testing/automation. Natural language ("you decide") through
+        /turn runs through this exact same helper."""
         if session.game_over:
             raise HTTPException(status_code=400, detail="game already over")
+        if daily_spend_usd(store.llm_metrics_log) >= store.config.daily_spend_cap_usd:
+            raise HTTPException(status_code=503, detail=SPEND_CAP_MESSAGE)
 
         outcome = await _execute_let_horse_decide(session, store, client)
         newly_unlocked = outcome.pop("newly_unlocked_field_guide")

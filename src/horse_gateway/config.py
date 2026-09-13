@@ -33,6 +33,15 @@ class GameConfig(BaseSettings):
     # Guardrails (see docs/design-plan.md "Guardrails" section).
     let_horse_decide_cooldown_seconds: float = 45.0
     social_post_cap_per_session: int = 1
+    # Hard cap on chat messages per session, in a rolling window -- "no
+    # unauthenticated [or authenticated] endpoint that can trigger
+    # unbounded LLM calls."
+    chat_rate_limit_max_messages: int = 20
+    chat_rate_limit_window_seconds: float = 600.0
+    # Global (all-sessions) daily spend ceiling on the Claude API budget.
+    # Once crossed, /turn and /let-horse-decide fail gracefully instead
+    # of making another LLM call, until the next UTC day.
+    daily_spend_cap_usd: float = 20.0
 
     # Live horse simulation thresholds (see "Model call architecture" and
     # "Refill timing" in docs/design-plan.md). Thirst is an unbounded

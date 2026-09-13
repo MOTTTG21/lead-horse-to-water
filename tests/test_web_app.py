@@ -352,3 +352,40 @@ def test_reset_clears_gameplay_but_keeps_field_guide_and_discovered_actions():
     # available again.
     tool_response = client.post("/tool/graze")
     assert tool_response.json()["horse_state"]["water_available"] is True
+
+
+# --- guardrails: chat rate limit and daily spend cap ---
+
+
+def test_turn_is_rate_limited_after_the_per_session_cap():
+    config = GameConfig(chat_rate_limit_max_messages=2)
+    client, _ = make_test_client(config=config)
+
+    first = client.post("/turn", json={"message": "hi"})
+    second = client.post("/turn", json={"message": "hi again"})
+    third = client.post("/turn", json={"message": "one more"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429
+
+
+def test_turn_fails_gracefully_once_the_daily_spend_cap_is_hit():
+    fake_client = ScriptedAnthropicClient(dialogue="Hello.")
+    config = GameConfig(daily_spend_cap_usd=0.0)  # already "exceeded"
+    client, _ = make_test_client(config=config, client=fake_client)
+
+    response = client.post("/turn", json={"message": "hi"})
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["dialogue"] == "The horse needs a nap. Come back tomorrow."
+    assert body["action_outcome"] is None
+
+
+def test_let_horse_decide_503s_once_the_daily_spend_cap_is_hit():
+    config = GameConfig(daily_spend_cap_usd=0.0)
+    client, _ = make_test_client(config=config)
+
+    response = client.post("/let-horse-decide")
+    assert response.status_code == 503
