@@ -42,10 +42,14 @@ from horse_gateway.models import Role
 class FakeTurnGenerator:
     def __init__(self, result: TurnResult):
         self.result = result
-        self.calls: list[tuple[list, str, str]] = []
+        self.calls: list[tuple[list, str, str, float, str]] = []
 
-    def generate_turn(self, conversation_history, player_message, environment_summary):
-        self.calls.append((conversation_history, player_message, environment_summary))
+    def generate_turn(
+        self, conversation_history, player_message, environment_summary, current_trust_level, current_stage
+    ):
+        self.calls.append(
+            (conversation_history, player_message, environment_summary, current_trust_level, current_stage)
+        )
         return self.result
 
 
@@ -91,10 +95,12 @@ def test_play_turn_forwards_history_message_and_environment_to_generator():
     session = SessionState(session_id="s5", role=Role.GUEST)
     history = [{"role": "user", "content": "hey"}, {"role": "assistant", "content": "neigh"}]
     runner.play_turn(session, history, "how are you?", "It is hot. The trough is empty.")
-    recorded_history, recorded_message, recorded_env = generator.calls[0]
+    recorded_history, recorded_message, recorded_env, recorded_trust, recorded_stage = generator.calls[0]
     assert recorded_history == history
     assert recorded_message == "how are you?"
     assert recorded_env == "It is hot. The trough is empty."
+    assert recorded_trust == session.trust_level
+    assert recorded_stage == session.stage
 
 
 # --- environment description: state only, never causal attribution ---
@@ -152,7 +158,7 @@ def test_claude_turn_generator_forces_structured_output_tool_choice():
     client = FakeAnthropicClient(response)
     generator = ClaudeTurnGenerator(client, model="claude-sonnet-5")
 
-    result = generator.generate_turn([], "Tell me how you feel.", "It is hot. The trough is empty.")
+    result = generator.generate_turn([], "Tell me how you feel.", "It is hot. The trough is empty.", 0.5, "precontemplation")
 
     assert result == TurnResult(dialogue="Hmm.", stage="contemplation", trust_delta=0.1)
     kwargs = client.messages.last_kwargs
@@ -169,7 +175,7 @@ def test_claude_turn_generator_rejects_an_invalid_stage():
     )
     generator = ClaudeTurnGenerator(FakeAnthropicClient(response), model="claude-sonnet-5")
     with pytest.raises(ValueError):
-        generator.generate_turn([], "hi", "")
+        generator.generate_turn([], "hi", "", 0.5, "precontemplation")
 
 
 def test_claude_turn_generator_clamps_out_of_range_trust_delta():
@@ -177,7 +183,7 @@ def test_claude_turn_generator_clamps_out_of_range_trust_delta():
         content=[FakeToolUseBlock(input={"dialogue": "x", "stage": "preparation", "trust_delta": 5.0})]
     )
     generator = ClaudeTurnGenerator(FakeAnthropicClient(response), model="claude-sonnet-5")
-    result = generator.generate_turn([], "hi", "")
+    result = generator.generate_turn([], "hi", "", 0.5, "precontemplation")
     assert result.trust_delta == 1.0
 
 
@@ -193,9 +199,56 @@ def test_claude_turn_generator_extracts_token_usage_when_present():
         usage=FakeUsage(input_tokens=123, output_tokens=45),
     )
     generator = ClaudeTurnGenerator(FakeAnthropicClient(response), model="claude-sonnet-5")
-    result = generator.generate_turn([], "hi", "")
+    result = generator.generate_turn([], "hi", "", 0.5, "precontemplation")
     assert result.input_tokens == 123
     assert result.output_tokens == 45
+
+
+def test_claude_turn_generator_passes_through_a_recognized_attempted_action():
+    response = FakeResponse(
+        content=[
+            FakeToolUseBlock(
+                input={
+                    "dialogue": "x",
+                    "stage": "precontemplation",
+                    "trust_delta": 0.0,
+                    "attempted_action": "clean_trough",
+                }
+            )
+        ]
+    )
+    generator = ClaudeTurnGenerator(FakeAnthropicClient(response), model="claude-sonnet-5")
+    result = generator.generate_turn([], "I'll clean the trough", "", 0.5, "precontemplation")
+    assert result.attempted_action == "clean_trough"
+
+
+def test_claude_turn_generator_defaults_attempted_action_to_none_when_absent():
+    response = FakeResponse(
+        content=[FakeToolUseBlock(input={"dialogue": "x", "stage": "precontemplation", "trust_delta": 0.0})]
+    )
+    generator = ClaudeTurnGenerator(FakeAnthropicClient(response), model="claude-sonnet-5")
+    result = generator.generate_turn([], "hi", "", 0.5, "precontemplation")
+    assert result.attempted_action is None
+
+
+def test_claude_turn_generator_degrades_an_unrecognized_attempted_action_to_none():
+    """Defensive: an out-of-enum value shouldn't crash the turn -- a
+    missed intent just means the player can rephrase."""
+    response = FakeResponse(
+        content=[
+            FakeToolUseBlock(
+                input={
+                    "dialogue": "x",
+                    "stage": "precontemplation",
+                    "trust_delta": 0.0,
+                    "attempted_action": "teleport_horse",
+                }
+            )
+        ]
+    )
+    generator = ClaudeTurnGenerator(FakeAnthropicClient(response), model="claude-sonnet-5")
+    result = generator.generate_turn([], "hi", "", 0.5, "precontemplation")
+    assert result.attempted_action is None
 
 
 def make_llm_metrics_log() -> LLMMetricsLog:

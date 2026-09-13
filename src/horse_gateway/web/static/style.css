@@ -109,6 +109,9 @@ nav { display: flex; gap: 0.5rem; }
 
 .hint { color: var(--muted); font-size: 0.9rem; }
 
+#panel-help h3 { color: var(--accent); margin-bottom: 0.25rem; }
+#panel-help p { margin-top: 0; line-height: 1.5; }
+
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #3a2c20; }

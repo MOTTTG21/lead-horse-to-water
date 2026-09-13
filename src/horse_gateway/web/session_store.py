@@ -46,6 +46,12 @@ class PlayerSession:
     attempt_count: int = 0
     game_over: bool = False
     won: bool = False
+    # Tool names the player has actually attempted (allowed or denied) at
+    # least once -- populated as they're discovered through play, never
+    # shown upfront. Persists across resets, same as field_guide: both
+    # are meant to accumulate across playthroughs, not restart with the
+    # game itself.
+    discovered_actions: set[str] = field(default_factory=set)
 
 
 class SessionStore:
@@ -100,3 +106,30 @@ class SessionStore:
             return self._sessions[session_id]
         new_id = session_id or self.new_session_id()
         return self.create(new_id)
+
+    def reset_gameplay(self, session: PlayerSession) -> None:
+        """Resets a session's gameplay state -- a fresh horse simulation,
+        trust/stage, conversation history, attempt count, and win/loss
+        flags -- after a game ends, win or loss. Deliberately leaves
+        field_guide and discovered_actions untouched: both are meant to
+        accumulate across playthroughs (see docs/design-plan.md's field
+        guide completion counter), not restart with the game itself.
+        """
+        horse_sim = HorseSimulationServer(config=self.config)
+        session.gateway = Gateway(
+            servers={
+                System.HORSE_SIM: horse_sim,
+                System.STABLE_RECORDS: self.stable_records_server,
+                System.SOCIAL: self.social_server,
+            },
+            audit_log=self.audit_log,
+            config=self.config,
+        )
+        session.horse_sim = horse_sim
+        session.game_state = SessionState(
+            session_id=session.session_id, role=session.game_state.role
+        )
+        session.conversation_history = []
+        session.attempt_count = 0
+        session.game_over = False
+        session.won = False

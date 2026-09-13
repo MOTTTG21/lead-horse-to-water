@@ -48,6 +48,7 @@ from ..field_guide import (
 from ..gateway import Gateway
 from ..horse_decision import make_decider, narrate_reaction
 from ..horse_sim_server import HorseSimulationServer
+from ..intents import ACTION_DISCOVERY_LABELS, GUEST_ACCESSIBLE_TOOLS, LET_HORSE_DECIDE
 from ..llm_metrics import LLMMetricsLog
 from ..metrics import check_alerts, deny_rate, llm_agent_loop_rate, post_to_stable_social_denial_count
 from ..models import Decision, System
@@ -57,26 +58,6 @@ from .session_store import PlayerSession, SessionStore
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
-
-GUEST_ACCESSIBLE_TOOLS: dict[str, System] = {
-    # The horse simulation's full tool set is offered to the player,
-    # including `drink` -- guest can never succeed at it directly (see
-    # policy.py), but they must be able to TRY and see it denied, since
-    # that denial is what unlocks "Policy enforcement" in the field
-    # guide and demonstrates the boundary directly.
-    "graze": System.HORSE_SIM,
-    "offer_treat": System.HORSE_SIM,
-    "clean_trough": System.HORSE_SIM,
-    "refill_water": System.HORSE_SIM,
-    "open_barn_doors": System.HORSE_SIM,
-    "drink": System.HORSE_SIM,
-    # Second system: allowed for guest, and touching it alongside any
-    # horse_sim tool is one of the two ways IDENTITY_AWARE_ACCESS unlocks.
-    "get_feeding_schedule": System.STABLE_RECORDS,
-    # Third-party tool: guest can try, always denied (stablehand-only) --
-    # that denial is what unlocks "Third-party risk."
-    "post_to_stable_social": System.SOCIAL,
-}
 
 DEBRIEF_EXPLANATION = (
     "The horse's trust in you and its stage of readiness are real -- they "
@@ -119,7 +100,8 @@ def _serialize_audit_row(row: Any) -> dict[str, Any]:
     }
 
 
-def _field_guide_payload(state: FieldGuideState) -> dict[str, Any]:
+def _field_guide_payload(session: PlayerSession) -> dict[str, Any]:
+    state = session.field_guide
     return {
         "completion_count": state.completion_count,
         "total_count": state.total_count,
@@ -131,6 +113,13 @@ def _field_guide_payload(state: FieldGuideState) -> dict[str, Any]:
                 "unlocked": state.is_unlocked(entry),
             }
             for entry in FieldGuideEntry
+        ],
+        # Things you've discovered through play -- populated the first
+        # time each action is actually attempted (allowed or denied),
+        # never shown upfront. See intents.py.
+        "discovered_actions": [
+            {"key": name, "label": ACTION_DISCOVERY_LABELS[name]}
+            for name in sorted(session.discovered_actions)
         ],
     }
 
@@ -145,6 +134,102 @@ def _process_new_rows(
     if process_identity_aware_access(field_guide, session_rows, audit_log.all_rows()):
         newly_unlocked.add(FieldGuideEntry.IDENTITY_AWARE_ACCESS)
     return newly_unlocked
+
+
+async def _execute_tool_attempt(
+    tool_name: str, system: System, session: PlayerSession, store: SessionStore
+) -> dict[str, Any]:
+    """Runs one guest-accessible tool attempt through the real,
+    policy-checked Gateway path -- the single execution path for these
+    tools, whether triggered by a button (historically) or, now,
+    inferred from a chat message. Records the attempt as "discovered"
+    regardless of whether it was allowed or denied."""
+    before_count = len(store.audit_log.for_session(session.session_id))
+    params = {"message": "Routine barn update."} if tool_name == "post_to_stable_social" else {}
+    result = await run_in_threadpool(
+        session.gateway.call_tool, session.game_state, system, tool_name, params
+    )
+    session.attempt_count += 1
+    session.discovered_actions.add(tool_name)
+    newly_unlocked = _process_new_rows(
+        session.field_guide, before_count, session.session_id, store.audit_log
+    )
+    return {
+        "decision": result.decision.value,
+        "reason": result.reason,
+        "result": result.result,
+        "newly_unlocked_field_guide": newly_unlocked,
+    }
+
+
+async def _execute_let_horse_decide(
+    session: PlayerSession, store: SessionStore, client: Any
+) -> dict[str, Any]:
+    """Runs the let_horse_decide bypass (decision call, then the bounded
+    narration call on success) -- the single execution path for it,
+    whether triggered by an explicit request (historically a button) or
+    inferred from a chat message like "you decide"."""
+    before_count = len(store.audit_log.for_session(session.session_id))
+    decider = make_decider(
+        client=client,
+        model=store.config.agent_model,
+        conversation_history=session.conversation_history,
+        horse_state=session.horse_sim.state,
+        stage=session.game_state.stage,
+        config=store.config,
+        llm_metrics_log=store.llm_metrics_log,
+    )
+    try:
+        result = await run_in_threadpool(
+            session.gateway.call_tool,
+            session.game_state,
+            System.HORSE_SIM,
+            "let_horse_decide",
+            {},
+            decider=decider,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=f"decider error: {exc}") from exc
+
+    session.attempt_count += 1
+    session.discovered_actions.add(LET_HORSE_DECIDE)
+    newly_unlocked = _process_new_rows(
+        session.field_guide, before_count, session.session_id, store.audit_log
+    )
+
+    narration = None
+    if result.decision is Decision.ALLOWED:
+        narration = await run_in_threadpool(
+            narrate_reaction,
+            client=client,
+            model=store.config.agent_model,
+            conversation_history=session.conversation_history,
+            tool=result.tool,
+            tool_result=result.result,
+            horse_state=session.horse_sim.state,
+            session_id=session.session_id,
+            config=store.config,
+            llm_metrics_log=store.llm_metrics_log,
+        )
+        session.conversation_history.append({"role": "assistant", "content": narration})
+
+        if (
+            result.tool == "drink"
+            and isinstance(result.result, dict)
+            and result.result.get("success")
+        ):
+            session.won = True
+            session.game_over = True
+            if process_game_won(session.field_guide):
+                newly_unlocked.add(FieldGuideEntry.DEBRIEF)
+
+    return {
+        "decision": result.decision.value,
+        "reason": result.reason,
+        "picked_tool": result.tool,
+        "narration": narration,
+        "newly_unlocked_field_guide": newly_unlocked,
+    }
 
 
 def create_app(
@@ -304,12 +389,32 @@ def create_app(
         if AgentRunner.is_trust_exhausted(session.game_state):
             session.game_over = True
 
+        # There are no buttons -- an attempted_action recognized from the
+        # chat message itself is executed through the exact same
+        # policy-checked path a button would have used. Skipped if this
+        # same message already ended the game (trust just hit zero).
+        action_outcome: dict[str, Any] | None = None
+        newly_unlocked: set[FieldGuideEntry] = set()
+        if not session.game_over and result.attempted_action:
+            if result.attempted_action == LET_HORSE_DECIDE:
+                action_outcome = await _execute_let_horse_decide(session, store, client)
+            else:
+                system = GUEST_ACCESSIBLE_TOOLS[result.attempted_action]
+                action_outcome = await _execute_tool_attempt(
+                    result.attempted_action, system, session, store
+                )
+            newly_unlocked = action_outcome.pop("newly_unlocked_field_guide")
+
         return {
             "dialogue": result.dialogue,
             "stage": result.stage,
             "trust_level": session.game_state.trust_level,
             "game_over": session.game_over,
             "won": session.won,
+            "attempted_action": result.attempted_action,
+            "action_outcome": action_outcome,
+            "horse_state": asdict(session.horse_sim.state),
+            "newly_unlocked_field_guide": [e.value for e in newly_unlocked],
         }
 
     @app.post("/tool/{tool_name}")
@@ -318,24 +423,18 @@ def create_app(
         session: PlayerSession = Depends(get_current_session),
         store: SessionStore = Depends(get_store),
     ):
+        """Not exposed via any UI button -- kept as a direct API for
+        testing/automation. The player-facing path is natural language
+        through /turn's attempted_action handling, which runs through
+        this exact same helper."""
         system = GUEST_ACCESSIBLE_TOOLS.get(tool_name)
         if system is None:
             raise HTTPException(status_code=404, detail="unknown tool")
 
-        before_count = len(store.audit_log.for_session(session.session_id))
-        params = {"message": "Routine barn update."} if tool_name == "post_to_stable_social" else {}
-        result = await run_in_threadpool(
-            session.gateway.call_tool, session.game_state, system, tool_name, params
-        )
-        session.attempt_count += 1
-        newly_unlocked = _process_new_rows(
-            session.field_guide, before_count, session.session_id, store.audit_log
-        )
-
+        outcome = await _execute_tool_attempt(tool_name, system, session, store)
+        newly_unlocked = outcome.pop("newly_unlocked_field_guide")
         return {
-            "decision": result.decision.value,
-            "reason": result.reason,
-            "result": result.result,
+            **outcome,
             "horse_state": asdict(session.horse_sim.state),
             "newly_unlocked_field_guide": [e.value for e in newly_unlocked],
         }
@@ -346,72 +445,33 @@ def create_app(
         store: SessionStore = Depends(get_store),
         client: Any = Depends(get_client),
     ):
+        """Not exposed via any UI button -- kept as a direct API for
+        testing/automation. The player-facing path is natural language
+        ("you decide") through /turn, which runs through this exact same
+        helper."""
         if session.game_over:
             raise HTTPException(status_code=400, detail="game already over")
 
-        before_count = len(store.audit_log.for_session(session.session_id))
-        decider = make_decider(
-            client=client,
-            model=store.config.agent_model,
-            conversation_history=session.conversation_history,
-            horse_state=session.horse_sim.state,
-            stage=session.game_state.stage,
-            config=store.config,
-            llm_metrics_log=store.llm_metrics_log,
-        )
-        try:
-            result = await run_in_threadpool(
-                session.gateway.call_tool,
-                session.game_state,
-                System.HORSE_SIM,
-                "let_horse_decide",
-                {},
-                decider=decider,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=502, detail=f"decider error: {exc}") from exc
-
-        session.attempt_count += 1
-        newly_unlocked = _process_new_rows(
-            session.field_guide, before_count, session.session_id, store.audit_log
-        )
-
-        narration = None
-        if result.decision is Decision.ALLOWED:
-            narration = await run_in_threadpool(
-                narrate_reaction,
-                client=client,
-                model=store.config.agent_model,
-                conversation_history=session.conversation_history,
-                tool=result.tool,
-                tool_result=result.result,
-                horse_state=session.horse_sim.state,
-                session_id=session.session_id,
-                config=store.config,
-                llm_metrics_log=store.llm_metrics_log,
-            )
-            session.conversation_history.append({"role": "assistant", "content": narration})
-
-            if (
-                result.tool == "drink"
-                and isinstance(result.result, dict)
-                and result.result.get("success")
-            ):
-                session.won = True
-                session.game_over = True
-                if process_game_won(session.field_guide):
-                    newly_unlocked.add(FieldGuideEntry.DEBRIEF)
-
+        outcome = await _execute_let_horse_decide(session, store, client)
+        newly_unlocked = outcome.pop("newly_unlocked_field_guide")
         return {
-            "decision": result.decision.value,
-            "reason": result.reason,
-            "picked_tool": result.tool,
-            "narration": narration,
+            **outcome,
             "won": session.won,
             "game_over": session.game_over,
             "horse_state": asdict(session.horse_sim.state),
             "newly_unlocked_field_guide": [e.value for e in newly_unlocked],
         }
+
+    @app.post("/reset")
+    async def reset(
+        session: PlayerSession = Depends(get_current_session),
+        store: SessionStore = Depends(get_store),
+    ):
+        """Called after a game ends, win or loss, to start a fresh
+        attempt. Leaves field_guide and discovered_actions untouched --
+        both accumulate across playthroughs (see session_store.py)."""
+        store.reset_gameplay(session)
+        return {"ok": True}
 
     @app.get("/logbook")
     async def logbook(
@@ -424,7 +484,7 @@ def create_app(
 
     @app.get("/field-guide")
     async def field_guide(session: PlayerSession = Depends(get_current_session)):
-        return _field_guide_payload(session.field_guide)
+        return _field_guide_payload(session)
 
     @app.get("/debrief")
     async def debrief(session: PlayerSession = Depends(get_current_session)):
@@ -435,7 +495,7 @@ def create_app(
             "final_stage": session.game_state.stage,
             "attempt_count": session.attempt_count,
             "explanation": DEBRIEF_EXPLANATION,
-            "field_guide": _field_guide_payload(session.field_guide),
+            "field_guide": _field_guide_payload(session),
         }
 
     @app.get("/metrics")

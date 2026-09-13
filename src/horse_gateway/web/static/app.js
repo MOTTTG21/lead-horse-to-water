@@ -31,6 +31,17 @@
     setTimeout(() => (unlockToast.hidden = true), 4000);
   }
 
+  function describeActionOutcome(attemptedAction, outcome) {
+    if (!attemptedAction || !outcome) return null;
+    if (outcome.decision === "denied") {
+      return attemptedAction + " denied (" + (outcome.reason || "policy") + ")";
+    }
+    if (attemptedAction === "let_horse_decide") {
+      return "The horse decided to: " + outcome.picked_tool;
+    }
+    return attemptedAction + " done.";
+  }
+
   async function postJSON(url, body) {
     const res = await fetch(url, {
       method: "POST",
@@ -80,6 +91,13 @@
       const data = await postJSON("/turn", { message });
       appendLine("horse", data.dialogue);
       setMeters(data.trust_level, data.stage);
+
+      const outcomeLine = describeActionOutcome(data.attempted_action, data.action_outcome);
+      if (outcomeLine) appendLine("system", outcomeLine);
+      if (data.action_outcome && data.action_outcome.narration) {
+        appendLine("horse", data.action_outcome.narration);
+      }
+      showUnlocks(data.newly_unlocked_field_guide);
       await maybeShowDebrief(data.game_over);
     } catch (err) {
       appendLine("system", "Error: " + err.message);
@@ -91,11 +109,12 @@
       const tool = button.dataset.tool;
       try {
         const data = await postJSON("/tool/" + tool);
-        if (data.decision === "denied") {
-          appendLine("system", tool + " denied (" + (data.reason || "policy") + ")");
-        } else {
-          appendLine("system", tool + " done.");
-        }
+        appendLine(
+          "system",
+          data.decision === "denied"
+            ? tool + " denied (" + (data.reason || "policy") + ")"
+            : tool + " done."
+        );
         showUnlocks(data.newly_unlocked_field_guide);
       } catch (err) {
         appendLine("system", "Error: " + err.message);
@@ -119,14 +138,24 @@
     }
   });
 
-  document.getElementById("debrief-close").addEventListener("click", () => {
+  document.getElementById("debrief-close").addEventListener("click", async () => {
     debriefOverlay.hidden = true;
+    try {
+      await postJSON("/reset");
+    } catch (err) {
+      appendLine("system", "Error resetting: " + err.message);
+      return;
+    }
+    chatLog.innerHTML = "";
+    setMeters(0.5, "precontemplation");
+    appendLine("system", "A new attempt begins.");
   });
 
   // --- tabs ---
 
   const tabs = {
     "tab-game": "panel-game",
+    "tab-help": "panel-help",
     "tab-logbook": "panel-logbook",
     "tab-guide": "panel-guide",
   };
@@ -166,6 +195,7 @@
   async function loadFieldGuide() {
     const data = await fetch("/field-guide").then((r) => r.json());
     guideCounter.textContent = "(" + data.completion_count + "/" + data.total_count + ")";
+
     const container = document.getElementById("guide-entries");
     container.innerHTML = "";
     for (const entry of data.entries) {
@@ -176,6 +206,21 @@
         ? "<h3>" + entry.title + "</h3><p>" + entry.body + "</p>"
         : "<h3>🔒 ???</h3>";
       container.appendChild(card);
+    }
+
+    const discovered = document.getElementById("discovered-actions");
+    discovered.innerHTML = "";
+    if (data.discovered_actions.length === 0) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "Nothing discovered yet -- try talking to the horse.";
+      discovered.appendChild(p);
+    }
+    for (const action of data.discovered_actions) {
+      const card = document.createElement("div");
+      card.className = "guide-card unlocked discovered-action";
+      card.innerHTML = "<h3>" + action.label + "</h3>";
+      discovered.appendChild(card);
     }
   }
 })();

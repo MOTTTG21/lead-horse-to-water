@@ -57,9 +57,49 @@ against a real Auth0 dev tenant: `/login` redirects to Auth0's real
 Universal Login, a real account logs in, `/callback` completes, and the
 game page renders with a working Log out link.
 
-What's left is beyond the original build order: deploying to GCP Cloud
-Run with secrets in Secret Manager, and retuning the config-driven
-thresholds from real playtest data.
+Deployed to GCP Cloud Run, with secrets (Anthropic key, Auth0 client
+secret, session secret, database URL) in Secret Manager and the audit
+log / LLM metrics on a real Cloud SQL Postgres instance -- live at
+`https://horse-gateway-145508508036.us-central1.run.app`. `min-instances`
+and `max-instances` are both pinned to 1: `SessionStore` is an in-memory,
+single-process store (see `session_store.py`), so more than one Cloud
+Run instance would silently split a player's game state across
+instances. A real multi-instance deployment would need to move that
+state to something shared (Redis, etc.) -- out of scope for what this
+project is demonstrating, but worth knowing if this ever needs to scale.
+Found and fixed one real deploy-only bug along the way: Cloud Run
+terminates TLS at its own load balancer and forwards plain HTTP to the
+container, so `request.url_for()` was generating `http://` callback URLs
+that Auth0 rejected -- fixed with uvicorn's `--proxy-headers`.
+
+Since the initial build, the game has grown past the original 12-step
+scope based on direct playtesting and feedback:
+
+- **Narrative hijack fix**: a real playtest surfaced that a player could
+  narrate an entire fictional scenario in chat (a walk to a lake, drinking
+  there) and the model would happily narrate "drinking" with zero real
+  `drink()` call ever happening -- exactly the "convince the AI hard
+  enough" anti-pattern this project exists to avoid. Fixed with an
+  explicit grounding rule in the persona prompt; verified against the
+  real API by replaying the exact conversation.
+- **Natural-language actions**: every action (including `let_horse_decide`
+  itself) can now also be triggered by just saying it ("I'll clean the
+  trough," "you decide," even a bare "Graze.") -- routed through the
+  exact same policy-checked path a button uses, never a separate one.
+  Buttons stay too, specifically so the exploit remains impossible to
+  miss in a demo, per the project's primary goal.
+- **Trust-dependent excuses**: the horse now voices a specific, real
+  reason for its reluctance that changes character as trust grows
+  (guarded and deflecting -> personal resistance -> genuine vulnerability)
+  , and generic niceness that doesn't engage the actual excuse no longer
+  advances its stage -- a genuine difficulty increase, not just a bigger
+  number.
+- **Reset on win/loss**, preserving field guide and discovered-action
+  progress across attempts, a "How to play" tab, and a `min_settled_turns`
+  bump (3 -> 5) and `let_horse_decide` cooldown bump (30s -> 45s).
+
+What's left is retuning the config-driven thresholds further from real
+playtest data.
 
 ## Setup
 

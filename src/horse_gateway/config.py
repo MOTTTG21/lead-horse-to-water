@@ -31,19 +31,23 @@ class GameConfig(BaseSettings):
     post_to_stable_social_denial_alert_threshold: int = 5
 
     # Guardrails (see docs/design-plan.md "Guardrails" section).
-    let_horse_decide_cooldown_seconds: float = 30.0
+    let_horse_decide_cooldown_seconds: float = 45.0
     social_post_cap_per_session: int = 1
 
     # Live horse simulation thresholds (see "Model call architecture" and
     # "Refill timing" in docs/design-plan.md). Thirst is an unbounded
     # accrual counter, not a fixed 0-10 scale -- there is no ceiling to
     # clamp against, only a threshold past which the horse is "thirsty
-    # enough."
+    # enough." The real difficulty lever is min_settled_turns_before_drinkable
+    # and the persona's excuses (agent_turn.py) -- thirst itself is trivial
+    # to clear by repeating clean_trough/open_barn_doors, on purpose (the
+    # design doc treats environmental setup as an ordering puzzle, not the
+    # hard part; genuine conversation is meant to be the hard part).
     thirst_increment_per_dry_action: float = 2.0
     thirst_increment_per_turn_while_dry: float = 0.5
     thirst_increment_per_turn_while_hot: float = 0.5
     thirst_threshold_for_win: float = 6.0
-    min_settled_turns_before_drinkable: int = 3
+    min_settled_turns_before_drinkable: int = 5
 
     # Synthetic stablehand traffic (see "Roles" in docs/design-plan.md).
     synthetic_traffic_interval_seconds: float = 15.0

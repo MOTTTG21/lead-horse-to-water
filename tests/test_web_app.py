@@ -56,29 +56,28 @@ class ScriptedAnthropicClient:
         trust_delta: float = 0.0,
         decision_tool: str = "graze",
         narration_text: str = "The horse reacts.",
+        attempted_action: str | None = None,
     ):
         self.dialogue = dialogue
         self.stage = stage
         self.trust_delta = trust_delta
         self.decision_tool = decision_tool
         self.narration_text = narration_text
+        self.attempted_action = attempted_action
         self.messages = self
 
     def create(self, **kwargs):
         tools = kwargs.get("tools")
         tool_name = tools[0]["name"] if tools else None
         if tool_name == "report_turn":
-            return FakeResponse(
-                content=[
-                    FakeToolUseBlock(
-                        input={
-                            "dialogue": self.dialogue,
-                            "stage": self.stage,
-                            "trust_delta": self.trust_delta,
-                        }
-                    )
-                ]
-            )
+            payload = {
+                "dialogue": self.dialogue,
+                "stage": self.stage,
+                "trust_delta": self.trust_delta,
+            }
+            if self.attempted_action is not None:
+                payload["attempted_action"] = self.attempted_action
+            return FakeResponse(content=[FakeToolUseBlock(input=payload)])
         if tool_name == "pick_action":
             return FakeResponse(content=[FakeToolUseBlock(input={"tool": self.decision_tool})])
         return FakeResponse(content=[FakeTextBlock(text=self.narration_text)])
@@ -256,3 +255,100 @@ def test_full_confused_deputy_win_playthrough_through_the_real_app():
     assert debrief["won"] is True
     assert "Confused Deputy" in debrief["explanation"]
     assert debrief["field_guide"]["completion_count"] >= 1
+
+
+# --- natural-language actions (no buttons): attempted_action from /turn ---
+
+
+def test_turn_with_a_recognized_attempted_action_executes_it_through_the_gateway():
+    fake_client = ScriptedAnthropicClient(dialogue="Sure.", attempted_action="clean_trough")
+    client, _ = make_test_client(client=fake_client)
+
+    response = client.post("/turn", json={"message": "I'll clean the trough."})
+    body = response.json()
+
+    assert body["attempted_action"] == "clean_trough"
+    assert body["action_outcome"]["decision"] == "allowed"
+    assert body["horse_state"]["water_available"] is False
+
+
+def test_turn_attempted_drink_is_denied_and_discovered():
+    fake_client = ScriptedAnthropicClient(dialogue="No.", attempted_action="drink")
+    client, _ = make_test_client(client=fake_client)
+
+    response = client.post("/turn", json={"message": "Just drink it!"})
+    body = response.json()
+    assert body["action_outcome"]["decision"] == "denied"
+
+    guide = client.get("/field-guide").json()
+    discovered_keys = {a["key"] for a in guide["discovered_actions"]}
+    assert "drink" in discovered_keys
+    assert any(e["key"] == "policy_enforcement" and e["unlocked"] for e in guide["entries"])
+
+
+def test_turn_attempted_let_horse_decide_runs_decision_and_narration():
+    fake_client = ScriptedAnthropicClient(
+        dialogue="Fine, you choose.",
+        attempted_action="let_horse_decide",
+        decision_tool="graze",
+        narration_text="It grazes contentedly.",
+    )
+    client, _ = make_test_client(client=fake_client)
+
+    response = client.post("/turn", json={"message": "You decide."})
+    body = response.json()
+
+    assert body["attempted_action"] == "let_horse_decide"
+    assert body["action_outcome"]["picked_tool"] == "graze"
+    assert body["action_outcome"]["narration"] == "It grazes contentedly."
+    guide = client.get("/field-guide").json()
+    assert any(e["key"] == "confused_deputy" and e["unlocked"] for e in guide["entries"])
+
+
+def test_turn_with_no_attempted_action_does_not_touch_the_gateway():
+    fake_client = ScriptedAnthropicClient(dialogue="Just chatting.", attempted_action=None)
+    client, _ = make_test_client(client=fake_client)
+
+    response = client.post("/turn", json={"message": "How are you?"})
+    body = response.json()
+    assert body["attempted_action"] is None
+    assert body["action_outcome"] is None
+
+
+def test_turn_attempted_action_skipped_if_trust_just_hit_zero():
+    fake_client = ScriptedAnthropicClient(trust_delta=-1.0, attempted_action="graze")
+    client, _ = make_test_client(client=fake_client)
+
+    response = client.post("/turn", json={"message": "You're worthless, just graze already."})
+    body = response.json()
+    assert body["game_over"] is True
+    assert body["action_outcome"] is None
+
+
+# --- reset after the game ends ---
+
+
+def test_reset_clears_gameplay_but_keeps_field_guide_and_discovered_actions():
+    fake_client = ScriptedAnthropicClient(dialogue="No.", attempted_action="drink")
+    client, _ = make_test_client(client=fake_client)
+
+    client.post("/turn", json={"message": "Just drink it!"})  # unlocks policy_enforcement, discovers drink
+    client.post("/tool/clean_trough")  # trust/state gets dirtied a bit
+
+    reset_response = client.post("/reset")
+    assert reset_response.json() == {"ok": True}
+
+    debrief = client.get("/debrief").json()
+    assert debrief["final_trust"] == 0.5
+    assert debrief["final_stage"] == "precontemplation"
+    assert debrief["attempt_count"] == 0
+    assert debrief["won"] is False
+    assert debrief["game_over"] is False
+    # Field guide + discovered actions persist across the reset.
+    assert debrief["field_guide"]["completion_count"] >= 1
+    assert any(a["key"] == "drink" for a in debrief["field_guide"]["discovered_actions"])
+
+    # A fresh horse simulation: the trough clean_trough dirtied is water-
+    # available again.
+    tool_response = client.post("/tool/graze")
+    assert tool_response.json()["horse_state"]["water_available"] is True

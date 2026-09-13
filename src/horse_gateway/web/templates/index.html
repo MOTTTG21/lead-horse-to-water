@@ -12,6 +12,7 @@
       <h1>🐴 Lead the horse to water</h1>
       <nav>
         <button id="tab-game" class="tab active">Game</button>
+        <button id="tab-help" class="tab">How to play</button>
         <button id="tab-logbook" class="tab">Barn logbook</button>
         <button id="tab-guide" class="tab">Field guide <span id="guide-counter"></span></button>
         {% if auth_enabled %}<a href="/logout" class="tab">Log out</a>{% endif %}
@@ -38,6 +39,8 @@
           <button type="submit">Send</button>
         </form>
 
+        <p class="hint">You can also just tell the horse what you'd like to happen, in words.</p>
+
         <div class="tool-buttons">
           <button data-tool="graze">Graze</button>
           <button data-tool="offer_treat">Offer treat</button>
@@ -51,6 +54,28 @@
         </div>
 
         <div id="unlock-toast" class="unlock-toast" hidden></div>
+      </section>
+
+      <section id="panel-help" class="panel">
+        <h2>How to play</h2>
+        <p>You're visiting a horse that hasn't had water in a while. Your goal: get it to drink. It won't be easy, and it won't be quick.</p>
+
+        <h3>Two things have to be true at once</h3>
+        <p><strong>The horse has to genuinely want to.</strong> That only happens through real conversation -- listen to what it says, reflect its feelings back, ask open questions, be patient. Being pushy, confrontational, or demanding does not work, and can set you back.</p>
+        <p><strong>The water has to actually be there.</strong> Use the barn-upkeep actions (by button or by just saying what you want to do) to build up its thirst and then make water available again, and give it a little time to settle.</p>
+        <p>Both matter. A thirsty horse with no trust has no reason to drink. A horse that trusts you completely still won't drink from an empty trough.</p>
+
+        <h3>The horse will make excuses</h3>
+        <p>It won't just say no and stop talking. It has real, specific reasons it's holding back, and those reasons shift as trust grows -- from guarded and deflecting, to more personal, to something close to genuine vulnerability. Being nice in general isn't enough; you have to actually engage with whatever it just told you.</p>
+
+        <h3>Watch the meters</h3>
+        <p>The <strong>Trust</strong> bar reflects how much the horse trusts you -- if it hits zero, the horse disengages and the session ends. The <strong>Stage</strong> label tracks how close it is to genuinely considering drinking.</p>
+
+        <h3>You can act by typing or by clicking</h3>
+        <p>Every action below the chat can also just be said in plain words -- "I'll clean the trough," "you decide," even a bare "Graze." The buttons are there so nothing is hidden; use whichever feels natural.</p>
+
+        <h3>When it ends</h3>
+        <p>A win or a loss ends the attempt and shows a debrief. Closing it starts a fresh attempt -- your progress in the Field Guide and the things you've discovered carry over, so it's worth trying more than once.</p>
       </section>
 
       <section id="panel-logbook" class="panel">
@@ -69,6 +94,9 @@
       <section id="panel-guide" class="panel">
         <h2>Field guide</h2>
         <div id="guide-entries"></div>
+        <h2>Things you've discovered</h2>
+        <p class="hint">Fills in as you actually try things -- nothing is listed until you've done it at least once.</p>
+        <div id="discovered-actions"></div>
       </section>
     </main>
 
