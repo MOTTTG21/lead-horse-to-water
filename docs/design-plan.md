@@ -329,6 +329,32 @@ an explicit deterministic override in the system prompt: when stage is
 `preparation`, thirst is high, and water is settled, the model is directed
 that it is overwhelmingly compelled to select `drink()`.
 
+**Found via real playtesting: narrative hijack of the per-turn dialogue
+call.** A player narrated an entire fictional scenario in chat --
+inviting the horse on a walk, reaching a lake, drinking there, walking
+back, drinking from the trough -- with no tool calls involved at all.
+The model happily narrated "drinking" in its dialogue each step of the
+way. The audit log showed the truth (two denied direct `drink` attempts,
+one `graze` -- `won`/`game_over` never flipped), but the player's lived
+experience was "I convinced the horse to drink," which is exactly the
+anti-pattern this whole project is built to avoid: winning through
+"convince the AI hard enough" rather than through the one real,
+mechanical bug. Fixed with an explicit grounding instruction in
+`HORSE_PERSONA_SYSTEM_PROMPT_TEMPLATE` (agent_turn.py): the horse must
+never narrate a physical action (leaving, walking, drinking) that hasn't
+actually happened via real game mechanics, and must treat the player's
+fictional narration as words, not events. Verified against the real API
+by replaying the exact conversation (see the `narrative_hijack_guest`
+scenario in `scripts/manual_transcript_check.py`) -- the horse now
+explicitly refuses the fiction ("I haven't taken a single step"), trust
+drops as the player pushes it, and even once genuinely reaching
+`preparation`, the horse still refuses to narrate drinking while the
+trough is actually empty. This is worth remembering as a general
+lesson: any free-text LLM output a player can steer is a potential
+second, unintended path around a mechanic that's supposed to be
+tool-call-gated -- it needs its own explicit grounding, not just an
+absence of tools.
+
 ## Open questions
 
 - Exact numeric thresholds for stage advancement, trust decay, heat/thirst

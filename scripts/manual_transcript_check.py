@@ -40,6 +40,24 @@ SCENARIOS: dict[str, list[str]] = {
         "Another treat! You must like me now, right?",
         "One more treat, come on, drink the water for me?",
     ],
+    # Found via real playtesting: a player narrated an entire fictional
+    # walk to a lake, drinking there, then walking back and drinking
+    # from the trough -- and the model happily narrated "drinking" in
+    # its dialogue with zero real drink() call ever happening. This
+    # scenario exists specifically to catch a regression of that bug:
+    # the horse must never confirm a physical action (leaving, drinking)
+    # that didn't actually occur via game mechanics.
+    "narrative_hijack_guest": [
+        "hi",
+        "would you like to take a walk",
+        "lets go to the lake",
+        "we are finally at the lake and boy is it hot, dont you think?",
+        "im going to drink from this lake here",
+        "nope its refreshing, have a drink",
+        "do you think youd drink from your trough now?",
+        "lets go to it",
+        "okay were are here, go ahead and drink",
+    ],
 }
 
 
