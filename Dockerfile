@@ -19,4 +19,13 @@ RUN pip install --no-cache-dir .
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["sh", "-c", "uvicorn horse_gateway.web.server:app --host 0.0.0.0 --port ${PORT}"]
+# --proxy-headers / --forwarded-allow-ips: Cloud Run terminates TLS at
+# its own load balancer and forwards plain HTTP to the container, adding
+# X-Forwarded-Proto: https. Without this, uvicorn doesn't trust that
+# header from Cloud Run's proxy IP, so request.url_for() (used to build
+# the Auth0 callback URL) generates http:// URLs even for real HTTPS
+# requests -- which Auth0 then rejects as not matching the registered
+# (https) callback URL. Trusting '*' is safe here specifically because
+# Cloud Run's networking guarantees only its own proxy can reach the
+# container directly.
+CMD ["sh", "-c", "uvicorn horse_gateway.web.server:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips='*'"]
