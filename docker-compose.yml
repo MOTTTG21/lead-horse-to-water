@@ -1,0 +1,30 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8420:8080"
+    environment:
+      DATABASE_URL: postgresql+psycopg://horse:horse@db:5432/horse_gateway
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: horse
+      POSTGRES_PASSWORD: horse
+      POSTGRES_DB: horse_gateway
+    ports:
+      - "5433:5432"
+    volumes:
+      - horse_gateway_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horse -d horse_gateway"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  horse_gateway_pgdata:

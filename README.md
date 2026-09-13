@@ -33,10 +33,23 @@ Following the build order (smallest, most isolated pieces first):
 - [x] 11. Field guide unlock logic (`field_guide.py`, tested)
 - [x] 12. Web UI -- FastAPI app (`web/app.py`), server-rendered (Jinja2 + a little JS), stub identity (every visitor is `guest`; real Auth0 is a later swap behind `get_current_session`). Chat, tool buttons (including `drink` and `post_to_stable_social`, which guest can try and see denied -- that's how "Policy enforcement" and "Third-party risk" get discovered), the `let_horse_decide` button with real narration, the barn logbook, the field guide tab, the debrief screen, and a `/dashboard` metrics page are all live and tested (`tests/test_web_app.py`) end to end, including a full win playthrough. Manually verified in a real browser against the real Claude API.
 
-All 12 build-order steps are done. What's left is beyond the original
-build order: wiring real Auth0 identity in behind `get_current_session`,
-deploying to GCP Cloud Run with secrets in Secret Manager, and retuning
-the config-driven thresholds from real playtest data.
+All 12 build-order steps are done. One thing the design doc calls for
+that wasn't actually built until after step 12: "containerized with
+Docker from day one." That's now in place (`Dockerfile`,
+`docker-compose.yml`) and verified two ways -- `pip install .` (a real,
+non-editable install, unlike local dev's `-e .`) was confirmed to
+correctly bundle the web templates/static files as package data, which
+it didn't before that fix; and the audit log / LLM metrics schema was
+verified against a real local Postgres instance (not just the SQLite
+used in tests), including running the full app against it end to end.
+Docker itself wasn't available to build/run in the environment this was
+built in, so `docker compose up --build` is worth running once yourself
+to confirm the image builds clean.
+
+What's left is beyond the original build order: wiring real Auth0
+identity in behind `get_current_session`, deploying to GCP Cloud Run
+with secrets in Secret Manager, and retuning the config-driven
+thresholds from real playtest data.
 
 ## Setup
 
@@ -56,6 +69,17 @@ Then open `http://127.0.0.1:8420/` to play, or `http://127.0.0.1:8420/dashboard`
 for the observability dashboard. Uses a local SQLite file
 (`horse_gateway.db`) by default; set `DATABASE_URL` to point at Postgres
 instead.
+
+### Or with Docker (app + real Postgres)
+
+```bash
+docker compose up --build
+```
+
+Reads `ANTHROPIC_API_KEY` from `.env` in this directory (`docker compose`
+picks it up automatically), runs the app against a real Postgres
+container rather than the SQLite fallback, and serves on
+`http://127.0.0.1:8420/`.
 
 ## Tests
 
