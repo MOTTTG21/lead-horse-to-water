@@ -340,7 +340,7 @@ def create_app(
                 # already-redeemed one-time authorization code, which
                 # Auth0 rejects. Whatever the cause, fail into a normal
                 # page with a way forward instead of an unhandled 500.
-                return templates.TemplateResponse(
+                response = templates.TemplateResponse(
                     request,
                     "message.html",
                     {
@@ -355,10 +355,12 @@ def create_app(
                     },
                     status_code=400,
                 )
+                response.headers["Cache-Control"] = "no-store"
+                return response
 
             userinfo = token.get("userinfo") or {}
             if not auth_config.is_email_allowed(userinfo.get("email")):
-                return templates.TemplateResponse(
+                response = templates.TemplateResponse(
                     request,
                     "message.html",
                     {
@@ -369,6 +371,8 @@ def create_app(
                     },
                     status_code=403,
                 )
+                response.headers["Cache-Control"] = "no-store"
+                return response
             request.session["user"] = userinfo
             return RedirectResponse(url="/")
 
