@@ -49,3 +49,31 @@ def test_get_current_user_sub_none_when_not_authenticated():
 def test_get_current_user_sub_returns_the_sub_claim():
     session = {"user": {"sub": "auth0|abc123", "email": "a@example.com"}}
     assert get_current_user_sub(session) == "auth0|abc123"
+
+
+# --- email allowlist ---
+
+
+def test_no_allowlist_configured_allows_anyone():
+    config = AuthConfig()
+    assert config.is_email_allowed("anyone@example.com") is True
+    assert config.is_email_allowed(None) is True
+
+
+def test_allowlist_permits_a_listed_email():
+    config = AuthConfig(allowed_emails="owner@example.com")
+    assert config.is_email_allowed("owner@example.com") is True
+
+
+def test_allowlist_denies_an_unlisted_email():
+    config = AuthConfig(allowed_emails="owner@example.com")
+    assert config.is_email_allowed("stranger@example.com") is False
+    assert config.is_email_allowed(None) is False
+
+
+def test_allowlist_is_case_insensitive_and_trims_whitespace():
+    config = AuthConfig(allowed_emails=" Owner@Example.com , second@example.com ")
+    assert config.is_email_allowed("owner@example.com") is True
+    assert config.is_email_allowed("OWNER@EXAMPLE.COM") is True
+    assert config.is_email_allowed("second@example.com") is True
+    assert config.is_email_allowed("third@example.com") is False

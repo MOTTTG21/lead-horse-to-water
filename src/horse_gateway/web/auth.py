@@ -40,6 +40,13 @@ class AuthConfig(BaseSettings):
     auth0_client_id: str = ""
     auth0_client_secret: str = ""
     session_secret_key: str = "dev-insecure-session-secret-key"
+    # Comma-separated allowlist, case-insensitive. Empty means no
+    # restriction -- anyone who completes real Auth0 login gets in. Set
+    # this to restrict the game to specific people while still using real
+    # Auth0 identity underneath (rather than, say, disabling public
+    # sign-up in the Auth0 dashboard, which only covers the database
+    # connection and not social logins).
+    allowed_emails: str = ""
 
     @property
     def configured(self) -> bool:
@@ -48,6 +55,12 @@ class AuthConfig(BaseSettings):
     @property
     def logout_return_to_url_param(self) -> str:
         return "returnTo"
+
+    def is_email_allowed(self, email: str | None) -> bool:
+        allowed = {e.strip().lower() for e in self.allowed_emails.split(",") if e.strip()}
+        if not allowed:
+            return True
+        return bool(email) and email.strip().lower() in allowed
 
 
 def register_oauth(config: AuthConfig) -> OAuth:

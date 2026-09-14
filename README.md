@@ -57,6 +57,14 @@ against a real Auth0 dev tenant: `/login` redirects to Auth0's real
 Universal Login, a real account logs in, `/callback` completes, and the
 game page renders with a working Log out link.
 
+Access can also be restricted to specific people via `ALLOWED_EMAILS`
+(comma-separated, case-insensitive) -- anyone else's Auth0 login still
+succeeds at Auth0 itself, but `/callback` shows a "this game is private"
+page instead of granting a session. Currently restricted to the owner
+only. A fuller request-access flow (visitor requests access, owner gets
+emailed, approves from an admin page) was discussed but not built --
+worth revisiting if this is ever shared more broadly.
+
 Deployed to GCP Cloud Run, with secrets (Anthropic key, Auth0 client
 secret, session secret, database URL) in Secret Manager and the audit
 log / LLM metrics on a real Cloud SQL Postgres instance -- live at

@@ -48,7 +48,7 @@ class FakeOAuth:
         self.auth0 = FakeAuth0Client(userinfo)
 
 
-def make_authed_test_client(userinfo: dict | None = None):
+def make_authed_test_client(userinfo: dict | None = None, allowed_emails: str = ""):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -61,6 +61,7 @@ def make_authed_test_client(userinfo: dict | None = None):
         auth0_domain="fake-tenant.us.auth0.com",
         auth0_client_id="fake-client-id",
         auth0_client_secret="fake-client-secret",
+        allowed_emails=allowed_emails,
     )
     app = create_app(
         anthropic_client=ScriptedAnthropicClient(),
@@ -148,3 +149,40 @@ def test_unconfigured_auth_has_no_login_routes():
     assert client.get("/login", follow_redirects=False).status_code == 404
     assert client.get("/").status_code == 200
     assert client.post("/tool/graze").status_code == 200
+
+
+# --- email allowlist ---
+
+
+def test_callback_rejects_a_non_allowed_email():
+    client, _ = make_authed_test_client(
+        userinfo={"sub": "auth0|stranger", "email": "stranger@example.com"},
+        allowed_emails="owner@example.com",
+    )
+    response = client.get("/callback?code=fake-code")
+    assert response.status_code == 403
+    assert "private" in response.text.lower()
+
+    # No session was granted -- still bounced to /login.
+    assert client.get("/", follow_redirects=False).headers["location"] == "/login"
+
+
+def test_callback_admits_an_allowed_email():
+    client, _ = make_authed_test_client(
+        userinfo={"sub": "auth0|owner", "email": "owner@example.com"},
+        allowed_emails="owner@example.com",
+    )
+    response = client.get("/callback?code=fake-code", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/"
+    assert client.get("/").status_code == 200
+
+
+def test_callback_allowlist_is_case_insensitive():
+    client, _ = make_authed_test_client(
+        userinfo={"sub": "auth0|owner", "email": "Owner@Example.com"},
+        allowed_emails="owner@example.com",
+    )
+    response = client.get("/callback?code=fake-code", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/"

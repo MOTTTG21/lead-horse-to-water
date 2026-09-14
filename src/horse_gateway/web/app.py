@@ -24,7 +24,7 @@ from typing import Any
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -334,7 +334,14 @@ def create_app(
         @app.get("/callback", name="auth_callback")
         async def auth_callback(request: Request):
             token = await oauth.auth0.authorize_access_token(request)
-            request.session["user"] = token.get("userinfo")
+            userinfo = token.get("userinfo") or {}
+            if not auth_config.is_email_allowed(userinfo.get("email")):
+                return HTMLResponse(
+                    "<h1>This game is private.</h1>"
+                    "<p>Access is restricted to specific accounts.</p>",
+                    status_code=403,
+                )
+            request.session["user"] = userinfo
             return RedirectResponse(url="/")
 
         @app.get("/logout")
