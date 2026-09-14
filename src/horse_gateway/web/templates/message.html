@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <div class="overlay-card" style="margin: 4rem auto;">
+      <h2>{{ title }}</h2>
+      <p>{{ message }}</p>
+      {% if link_href %}<p><a class="tab" href="{{ link_href }}">{{ link_text }}</a></p>{% endif %}
+    </div>
+  </div>
+</body>
+</html>

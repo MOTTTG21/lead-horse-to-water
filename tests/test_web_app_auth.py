@@ -29,10 +29,11 @@ from test_web_app import ScriptedAnthropicClient
 
 
 class FakeAuth0Client:
-    def __init__(self, userinfo: dict):
+    def __init__(self, userinfo: dict, fail_token_exchange: bool = False):
         self.userinfo = userinfo
         self.authorize_redirect_calls: list[str] = []
         self.authorize_access_token_calls = 0
+        self.fail_token_exchange = fail_token_exchange
 
     async def authorize_redirect(self, request, redirect_uri: str):
         self.authorize_redirect_calls.append(redirect_uri)
@@ -40,15 +41,19 @@ class FakeAuth0Client:
 
     async def authorize_access_token(self, request):
         self.authorize_access_token_calls += 1
+        if self.fail_token_exchange:
+            raise RuntimeError("invalid_grant: authorization code already redeemed")
         return {"userinfo": self.userinfo}
 
 
 class FakeOAuth:
-    def __init__(self, userinfo: dict):
-        self.auth0 = FakeAuth0Client(userinfo)
+    def __init__(self, userinfo: dict, fail_token_exchange: bool = False):
+        self.auth0 = FakeAuth0Client(userinfo, fail_token_exchange=fail_token_exchange)
 
 
-def make_authed_test_client(userinfo: dict | None = None, allowed_emails: str = ""):
+def make_authed_test_client(
+    userinfo: dict | None = None, allowed_emails: str = "", fail_token_exchange: bool = False
+):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -56,7 +61,10 @@ def make_authed_test_client(userinfo: dict | None = None, allowed_emails: str = 
     )
     audit_log = AuditLog(engine)
     llm_metrics_log = LLMMetricsLog(engine)
-    fake_oauth = FakeOAuth(userinfo or {"sub": "auth0|test-user-1", "email": "a@example.com"})
+    fake_oauth = FakeOAuth(
+        userinfo or {"sub": "auth0|test-user-1", "email": "a@example.com"},
+        fail_token_exchange=fail_token_exchange,
+    )
     auth_config = AuthConfig(
         auth0_domain="fake-tenant.us.auth0.com",
         auth0_client_id="fake-client-id",
@@ -162,9 +170,20 @@ def test_callback_rejects_a_non_allowed_email():
     response = client.get("/callback?code=fake-code")
     assert response.status_code == 403
     assert "private" in response.text.lower()
+    assert '/login' in response.text  # a way back, not a dead end
 
     # No session was granted -- still bounced to /login.
     assert client.get("/", follow_redirects=False).headers["location"] == "/login"
+
+
+def test_callback_with_an_already_redeemed_code_fails_gracefully():
+    """Refreshing the callback page re-submits the same one-time
+    authorization code, which Auth0 rejects on reuse -- this must not
+    surface as an unhandled 500."""
+    client, _ = make_authed_test_client(fail_token_exchange=True)
+    response = client.get("/callback?code=already-used")
+    assert response.status_code == 400
+    assert '/login' in response.text
 
 
 def test_callback_admits_an_allowed_email():
